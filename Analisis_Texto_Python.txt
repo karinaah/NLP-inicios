@@ -1,0 +1,1294 @@
+
+#===================================================================================================
+# Importacion de librerias 
+#===================================================================================================
+
+
+import pandas as pd
+import numpy as np
+
+import spacy 
+from spacy import displacy
+
+from spacy.training.example import Example
+from spacy.scorer import Scorer
+from spacy.util import minibatch,compounding
+
+import unidecode
+
+import random
+from pprint import pprint
+
+
+import matplotlib.pyplot as plt
+import plotly.express as px
+from wordcloud import WordCloud # https://www.edureka.co/community/64068/installing-wordcloud-using-unable-getting-following-error
+
+from apyori import apriori
+
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.model_selection import cross_validate
+from sklearn.metrics import f1_score,ConfusionMatrixDisplay,confusion_matrix,classification_report
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+import xgboost as xgb
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+
+import tensorflow as tf
+from tensorflow import keras
+from keras.layers import TextVectorization
+from keras.models import Sequential
+from keras.layers import Dense,Dropout,Embedding,Conv1D,GlobalMaxPool1D,Bidirectional,LSTM
+import keras_tuner as kt
+from keras.backend import clear_session
+from keras.preprocessing.text import Tokenizer
+from keras_preprocessing.sequence import pad_sequences
+from keras import initializers
+from keras.callbacks import EarlyStopping
+
+from lime.lime_text import LimeTextExplainer
+
+
+
+
+
+#===================================================================================================
+# Ejercicios varios
+#===================================================================================================
+
+# https://www.youtube.com/watch?v=RNiLVCE5d4k&t=3s&ab_channel=Explosion
+
+
+# definir un texto 
+texto = 'Orlando Bloom sorprendió con radical cambio de look: estaría en campaña para agrandar su familia con 1 Katy Perry'
+print(texto)
+
+
+# cargar modelo nlp (en español previamente cargado)
+# !python -m spacy download es_core_news_sm
+nlp1 = spacy.load('es_core_news_sm')
+
+nlp1.pipe_names
+
+
+doc1 = nlp1(texto)
+doc1
+
+type(doc1) # revisar tipo de objeto
+
+#___________________________________________________________________________
+# revisar atributos del objeto (https://spacy.io/usage/linguistic-features)
+
+doc1.ents # entidades encontradas en el texto
+
+doc1.sentiment # grado de sentimiento del texto
+
+# https://spacy.io/api/token#attributes
+for t in doc1:
+  print(
+    t.i,' --- ',
+    t.text,' --- ',
+    t.lemma_,' --- ',
+    t.pos_,' --- ',
+    t.tag_,' --- ',
+    t.dep_,' --- ',
+    t.shape_,' --- ',
+    t.is_alpha,' --- ',   
+    t.is_stop,' --- ',
+    t.is_digit,'---',
+    t.is_punct,'---',
+    t.is_bracket,'---',
+    t.is_quote,'---',
+    t.is_currency,'---',
+    t.is_lower,'---',
+    t.is_upper,'---',
+    t.like_num,'---',
+    t.like_email,'---'
+    )
+
+
+# guardar atributos en un df
+df_token_atributos = pd.DataFrame([])
+df_token_atributos
+
+for t in doc1:
+  
+  # los atributos que finalizan con "_" (como "lemma_") retornan un string, NO un numero
+  df_token_atributos = pd.concat([
+    df_token_atributos,
+    pd.DataFrame({
+      'i': t.i, # indice, ubicacion del token
+      'text': t.text, # texto del token
+      'lemma_': t.lemma_, # origen del texto (palabra raiz)
+      'pos_': t.pos_, # part of speach (pos), dice si es sustantivo (NOUN), verbo, etc
+      'tag_': t.tag_, # similar a pos
+      'dep_': t.dep_, # depedencia del token respecto de resto de tokens
+      'shape_': t.shape_, # forma del token
+      'is_alpha': t.is_alpha, # boolean de si es una letra
+      'is_stop': t.is_stop, # boolean de si es una stop word (articulo, conjuncion, preposicion, etc)
+      'is_digit': t.is_digit, # boolean de si es un numero
+      'is_punct': t.is_punct, # boolean de si es puntuacion
+      'is_bracket': t.is_bracket, # boolean de si es parentesis
+      'is_quote': t.is_quote, # boolean de si es comillas
+      'is_currency': t.is_currency, # boolean de si es signo de peso/moneda
+      'is_lower': t.is_lower, # boolean de si es minuscula
+      'is_upper': t.is_upper, # boolean de si es mayuscula
+      'like_num': t.like_num, # boolean de si es como numero ("uno", "dos", "1,1")
+      'like_email': t.like_email  # boolean de si es como mail (contiene @)
+    },index=[0])
+  ])
+  
+df_token_atributos
+
+
+spacy.explain('PROPN')
+
+
+#___________________________________________________________________________
+# Graficar relaciones de dependencia
+
+
+displacy.render(doc1,style='dep',jupyter=True)
+
+
+#___________________________________________________________________________
+# Mostrar entidades
+
+displacy.render(doc1,style='ent',jupyter=True)
+
+
+
+
+#===================================================================================================
+# Ejercicios de limpieza de texto, nube de palabras y reglas de asociacion
+#===================================================================================================
+
+# lectura del archivo 
+df_texto = pd.read_excel('comentarios.xlsx')
+df_texto
+
+# calcular primer largo del texto (algunos posiblemente sean muy cortos)
+df_texto['largo_texto']=df_texto['review'].apply(lambda x: len(str(x)))
+df_texto
+
+# importar modelo para tokenizar 
+nlp = spacy.load('es_core_news_sm')
+
+# revisar un primer texto 
+texto1 = df_texto.iloc[3,0]
+# texto1 = 'Lamentable engendro de aventuras, con actores auténticamente penosos, guión infame y supervisto y chistecillos baratos dirigidos a niños de 1 a 2 años, eso sí, siempre que estos no estén muy espabilados.'
+texto1
+
+doc1 = nlp(texto1)
+doc1
+
+# generar lista de tokens (sin limpieza) (https://spacy.io/api/token)
+[t.text for t in doc1]
+
+# generar lista de tokens (con minusculas)
+[t.text.lower() for t in doc1]
+
+# generar lista de tokens (con minusculas + quitar puntuaciones)
+[t.text.lower() for t in doc1 if not t.is_punct]
+
+# generar lista de tokens (con minusculas + quitar puntuaciones + quitar stop words)
+[t.text.lower() for t in doc1 if not t.is_punct and not t.is_stop]
+
+# generar lemma de tokens (con minusculas + quitar puntuaciones + quitar stop words + quitar numeros)
+[t.lemma_.lower() for t in doc1 if not t.is_punct and not t.is_stop and not t.is_digit]
+
+# generar lemma de tokens (con minusculas + quitar puntuaciones + quitar stop words + quitar numeros)
+[t.lemma_.lower() for t in doc1 if not t.is_punct and not t.is_stop and not t.is_digit]
+
+# generar lemma de tokens (con minusculas + quitar puntuaciones + quitar stop words + quitar numeros)
+[
+  t.lemma_.lower().replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u')
+  for t in doc1 if not t.is_punct and not t.is_stop and not t.is_digit
+  ]
+
+
+# crear en df campo con lista de tokens depurados
+df_texto['lista_tokens']=''
+df_texto
+
+for i in range(0,len(df_texto)):
+    
+  # print(i)
+  
+  texto = df_texto.iloc[i,0]
+  
+  if not pd.isna(texto): 
+  
+    doc1 = nlp(df_texto.iloc[i,0])
+    
+    lista = [
+      t.lemma_.lower().replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u')
+      for t in doc1 if not t.is_punct and not t.is_stop and not t.is_digit and not t.is_space
+    ]
+    
+    df_texto.at[i,'lista_tokens']=lista
+
+df_texto
+
+
+
+
+
+#____________________________________________________________________________________________
+# Aplicar visualizacion de nube de palabras
+
+# Agregar un id correlativo a la data
+df_texto['id']=[i+1 for i in range(0,len(df_texto))]
+df_texto
+
+# expandir df por palabra (https://stackoverflow.com/questions/39011511/pandas-expand-rows-from-list-data-available-in-column)
+df_texto2 = df_texto.explode('lista_tokens').reset_index(drop=True)
+df_texto2
+
+
+# https://stackoverflow.com/questions/38465478/wordcloud-from-data-frame-with-frequency-python
+plt.figure(figsize=(12,12))
+            
+wordcloud = WordCloud(
+width=800, 
+height=400,
+background_color='salmon', 
+colormap='Pastel1',
+max_words=50
+).generate_from_frequencies(
+    df_texto2.groupby('lista_tokens')['lista_tokens'].count().to_dict()
+    )
+
+plt.imshow(wordcloud, interpolation='bilinear')
+plt.axis('off')
+plt.figure()
+plt.show()
+        
+     
+
+#____________________________________________________________________________________________
+# Aplicar algoritmo apriori 
+
+# crear nuevo df solo con palabras mayor a un largo definido
+df_texto2_apriori = df_texto2.loc[df_texto2['lista_tokens'].str.len()>=4,['id','lista_tokens']]
+df_texto2_apriori
+
+
+# crear funcion propia que se usara mas adelante
+def inspect(output):
+  lhs        = [tuple(result[2][0][0])[0] for result in output]
+  rhs        = [tuple(result[2][0][1])[0] for result in output]
+  support    = [result[1] for result in output]
+  confidence = [result[2][0][2] for result in output]
+  lift       = [result[2][0][3] for result in output]
+  return list(zip(lhs, rhs, support, confidence, lift))
+
+
+# https://stackoverflow.com/questions/62270442/how-to-convert-a-dataframe-into-the-dataframe-for-apriori-algorithm
+lista_apriori = df_texto2_apriori.groupby('id')['lista_tokens'].apply(list).values
+lista_apriori
+
+
+# arrojar regla de priori 
+reglas = apriori(
+    transactions = lista_apriori, 
+    min_support = 0.01, 
+    min_confidence = 0.01, 
+    min_lift = 3, 
+    min_length = 2, 
+    max_length = 2
+    )
+reglas
+
+df_reglas = pd.DataFrame(
+    inspect(list(reglas)), # usar funcion propia "inspect" creada en el comienzo
+    columns = ['Antecedente', 'Consecuente', 'Soporte', 'Confianza', 'Lift']
+    )
+df_reglas
+
+# ordenar relaciones entre palabras 
+df_reglas = df_reglas.sort_values(by=['Confianza'], ascending=False)
+df_reglas
+
+
+
+
+#===================================================================================================
+# Ejercicios de clases: Modelo de bag of word para predecir spam usando TfidfVectorizer (Clas Binaria)
+#===================================================================================================
+
+# importar data
+df_spam = pd.read_csv('spam_classification.csv')
+df_spam
+
+# crear variable binaria para clasificar
+df_spam['y']=df_spam['category'].apply(lambda x: 1 if x=='spam' else 0)
+df_spam['y'].value_counts(normalize=True)
+
+# importar modelo de spacy
+# !python -m spacy download en_core_web_sm
+nlp = spacy.load('en_core_web_sm')
+
+# crear funcion propia para limpieza de tokens
+def lista_tokens(texto):
+  doc = nlp(texto)
+  tokens = [
+      t.lemma_.lower().replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u')
+      for t in doc if not t.is_punct and not t.is_stop and not t.is_digit and not t.is_space
+    ]
+  return tokens
+
+# crear objeto tfidf
+tfidf_vectorizer = TfidfVectorizer(
+  lowercase=None,
+  preprocessor=None,
+  tokenizer=lista_tokens
+)
+
+# ajustar objeto a columna de mensajes
+tfidf_vectorizer.fit(df_spam['Message'])
+
+# tamaño del diccionario
+len(tfidf_vectorizer.get_feature_names())
+
+# generar representacion vetorial
+tfidf_vectors = tfidf_vectorizer.transform(df_spam['Message'])
+tfidf_vectors
+
+tfidf_vectors.shape # queda una 'tabla' de 5572 filas x 7706 columnas
+
+
+# Se reduce dimensionalidad para usar menos columnas usando SVD
+n_componentes = 1000
+SVD_spam = TruncatedSVD(n_components=n_componentes,random_state=0)
+SVD_spam = SVD_spam.fit(tfidf_vectors)
+SVD_spam
+
+# revisar varianza explicada por la cantidad de componentes seleccionadas
+SVD_spam.explained_variance_ratio_
+
+SVD_spam.explained_variance_ratio_.sum()
+
+df_varianza = pd.DataFrame({
+  'componente': range(1,1+len(SVD_spam.explained_variance_ratio_)),
+  'Porcentaje_varianza': SVD_spam.explained_variance_ratio_
+})
+df_varianza['Porcentaje_varianza_acumulado']=df_varianza['Porcentaje_varianza'].cumsum()
+df_varianza
+
+
+px.line(df_varianza,x='componente',y='Porcentaje_varianza_acumulado')
+
+
+# generar vector final con reduccion de dimensionalidad
+tfidf_vectors_lsa = SVD_spam.transform(tfidf_vectors)
+tfidf_vectors_lsa
+
+tfidf_vectors_lsa.shape
+
+
+# Se construye el df con los atributos relevantes
+df_spam2 = pd.concat([
+  df_spam,
+  pd.DataFrame(
+    tfidf_vectors_lsa,
+    columns=['C'+str(i) for i in range(1,1+tfidf_vectors_lsa.shape[1])]
+    )
+  ],axis=1)
+
+df_spam2
+
+# Crear variables para modelar
+var_x = ['C'+str(i) for i in range(1,1+500)] # se usaran solo 500 variables
+var_x
+
+var_y= 'y'
+
+df_modelo = df_spam2[[var_y]+var_x]
+df_modelo
+
+data_train_x,data_test_x,data_train_y,data_test_y = train_test_split(
+  df_modelo[var_x],
+  df_modelo[var_y],
+  train_size=0.8,
+  random_state=0,
+  stratify=df_modelo[var_y]
+)
+
+print('data_train_x',data_train_x.shape)
+print('data_test_x',data_test_x.shape)
+print('data_train_y',data_train_y.shape)
+print('data_test_y',data_test_y.shape)
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo KNN
+
+Modelo_KNN_GS = GridSearchCV(
+  estimator=KNeighborsClassifier(),
+  param_grid=[{
+    'n_neighbors': list(range(4,10,1))
+    }],
+  n_jobs=-1,
+  scoring='f1'
+  )
+
+Modelo_KNN_GS.fit(data_train_x,data_train_y) # entrenar modelo 
+
+Modelo_KNN_GS.best_params_ # revisar mejor paramtro
+
+Modelo_KNN = Modelo_KNN_GS.best_estimator_ # quedarse con mejor modelo/estimador
+Modelo_KNN
+
+# indicadores de ajuste 
+Modelo_KNN_CV = cross_validate(Modelo_KNN,data_train_x,data_train_y,cv=5,scoring=['f1'])
+print('Ajuste f1-score:',round(Modelo_KNN_CV['test_f1'].mean(),3),'+-',round(Modelo_KNN_CV['test_f1'].std(),3))
+
+y_pred = Modelo_KNN.predict(data_test_x)
+y_pred
+
+print(confusion_matrix(data_test_y,y_pred))
+print(classification_report(data_test_y,y_pred))
+
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo RL (regresion)
+
+Modelo_RL_GS = GridSearchCV(
+  estimator=LogisticRegression(),
+  param_grid=[{
+    'C': np.linspace(0.01,0.5,10)
+    }],
+  n_jobs=-1,
+  scoring='f1'
+  )
+
+Modelo_RL_GS.fit(data_train_x,data_train_y) # entrenar modelo 
+
+Modelo_RL_GS.best_params_ # revisar mejor paramtro
+
+Modelo_RL = Modelo_RL_GS.best_estimator_ # quedarse con mejor modelo/estimador
+Modelo_RL
+
+# indicadores de ajuste 
+Modelo_RL_CV = cross_validate(Modelo_RL,data_train_x,data_train_y,cv=5,scoring=['f1'])
+print('Ajuste f1-score:',round(Modelo_RL_CV['test_f1'].mean(),3),'+-',round(Modelo_RL_CV['test_f1'].std(),3))
+
+y_pred = Modelo_RL.predict(data_test_x)
+y_pred
+
+print(confusion_matrix(data_test_y,y_pred))
+print(classification_report(data_test_y,y_pred))
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo RF (random forest)
+
+Modelo_RF_GS = GridSearchCV(
+  estimator=RandomForestClassifier(random_state=0),
+  param_grid=[{
+    'n_estimators': list(range(4,16,2)),
+    'min_samples_leaf': list(range(10,40,5))
+     }],
+  n_jobs=-1,
+  scoring='f1'
+  )
+
+Modelo_RF_GS.fit(data_train_x,data_train_y) # entrenar modelo 
+
+Modelo_RF_GS.best_params_ # revisar mejor paramtro
+
+Modelo_RF = Modelo_RF_GS.best_estimator_ # quedarse con mejor modelo/estimador
+Modelo_RF
+
+# indicadores de ajuste 
+Modelo_RF_CV = cross_validate(Modelo_RF,data_train_x,data_train_y,cv=5,scoring=['f1'])
+print('Ajuste f1-score:',round(Modelo_RF_CV['test_f1'].mean(),3),'+-',round(Modelo_RF_CV['test_f1'].std(),3))
+
+y_pred = Modelo_RF.predict(data_test_x)
+y_pred
+
+print(confusion_matrix(data_test_y,y_pred))
+print(classification_report(data_test_y,y_pred))
+
+
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo XGB (eXtreme Gradient Boosting)
+
+Modelo_XGB_GS = GridSearchCV(
+  estimator=xgb.XGBClassifier(random_state=0),
+  param_grid=[{
+    'learning_rate': np.linspace(0.1,1,5),
+    'n_estimators': list(range(2,10,1))
+     }],
+  n_jobs=-1,
+  scoring='f1'
+  )
+
+Modelo_XGB_GS.fit(data_train_x,data_train_y) # entrenar modelo 
+
+Modelo_XGB_GS.best_params_ # revisar mejor paramtro
+
+Modelo_XGB = Modelo_XGB_GS.best_estimator_ # quedarse con mejor modelo/estimador
+Modelo_XGB
+
+# indicadores de ajuste 
+Modelo_XGB_CV = cross_validate(Modelo_XGB,data_train_x,data_train_y,cv=5,scoring=['f1'])
+print('Ajuste f1-score:',round(Modelo_XGB_CV['test_f1'].mean(),3),'+-',round(Modelo_XGB_CV['test_f1'].std(),3))
+
+y_pred = Modelo_XGB.predict(data_test_x)
+y_pred
+
+print(confusion_matrix(data_test_y,y_pred))
+print(classification_report(data_test_y,y_pred))
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Resumen de Modelos
+
+print('KNN f1-score:',round(Modelo_KNN_CV['test_f1'].mean(),3),'+-',round(Modelo_KNN_CV['test_f1'].std(),3))
+print('RL f1-score:',round(Modelo_RL_CV['test_f1'].mean(),3),'+-',round(Modelo_RL_CV['test_f1'].std(),3))
+print('RF f1-score:',round(Modelo_RF_CV['test_f1'].mean(),3),'+-',round(Modelo_RF_CV['test_f1'].std(),3))
+print('XGB f1-score:',round(Modelo_XGB_CV['test_f1'].mean(),3),'+-',round(Modelo_XGB_CV['test_f1'].std(),3))
+
+
+
+
+
+
+#===================================================================================================
+# Ejercicios de clases: Modelo de Deep Learning Multi-Clase
+#===================================================================================================
+
+# importar data de train y test para analisis de sentimiento 
+sa_train = pd.read_csv('sentiment_analysis_train.csv',encoding='latin-1')
+sa_test = pd.read_csv('sentiment_analysis_test.csv',encoding='latin-1')
+
+df_sa = pd.concat([sa_train,sa_test],axis=0).reset_index(drop=True)
+df_sa
+
+# revisar proporcion de casos 
+df_sa['Sentiment'].value_counts(normalize=True)
+
+# importar modelo de spacy
+# !python -m spacy download en_core_web_sm
+nlp = spacy.load('en_core_web_sm')
+
+
+# obtener representacion vectorial
+doc = nlp(df_sa.loc[2,'OriginalTweet'])
+doc.vector
+
+doc_vectors =[]
+for t in df_sa['OriginalTweet']:
+  doc = nlp(t)
+  doc_vectors.append(doc.vector)
+  
+doc_vectors 
+
+# crear df con nueva informacion
+df_sa2 = pd.concat([
+  df_sa,
+  pd.DataFrame(
+    doc_vectors,
+    columns=['V'+str(i) for i in range(1,1+len(doc_vectors[0]))]
+    )
+  ],axis=1)
+
+df_sa2
+
+
+# aplicar tratamiento sobre variable a predecir (multiclase)
+lb = LabelBinarizer()
+lb.fit(df_sa2['Sentiment'])
+
+lb.classes_
+len(lb.classes_)
+
+df_sa3=pd.concat([
+  df_sa2,
+  pd.DataFrame(
+    lb.transform(df_sa2['Sentiment']),
+    columns=['y'+str(i) for i in range(1,1+len(lb.classes_))]
+    )
+  ],axis=1)
+
+df_sa3.sample(5)
+
+
+# definir variables x e y, para luego separar bases
+var_x = ['V'+str(i) for i in range(1,1+len(doc_vectors[0]))]
+var_x
+
+var_y = ['y'+str(i) for i in range(1,1+len(lb.classes_))]
+var_y
+
+df_modelo = df_sa3[var_x+var_y]
+df_modelo
+
+data_train_x,data_test_x,data_train_y,data_test_y = train_test_split(
+  df_modelo[var_x],
+  df_modelo[var_y],
+  train_size=0.8,
+  random_state=0,
+  stratify=df_modelo[var_y]
+)
+
+print('data_train_x',data_train_x.shape)
+print('data_test_x',data_test_x.shape)
+print('data_train_y',data_train_y.shape)
+print('data_test_y',data_test_y.shape)
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo1 DL (Deep Leaning)
+
+
+Modelo_DL1 = Sequential()
+Modelo_DL1.add(Dense(96,input_dim=data_train_x.shape[1],activation='relu'))
+Modelo_DL1.add(Dropout(0.2))
+Modelo_DL1.add(Dense(96,activation='relu'))
+Modelo_DL1.add(Dropout(0.1))
+Modelo_DL1.add(Dense(3,activation='softmax'))
+
+Modelo_DL1.compile(loss='categorical_crossentropy',optimizer='adam',metrics=['accuracy'])
+
+
+Modelo_DL1.summary()
+
+Modelo_DL1_H = Modelo_DL1.fit(
+  data_train_x,
+  data_train_y,
+  epochs=50,
+  validation_split=0.2,
+  batch_size=5  
+)
+
+
+# graficar resultados de la red
+Modelo_DL1_ajuste = pd.DataFrame(Modelo_DL1_H.history)
+Modelo_DL1_ajuste['epoca']=range(1,1+len(Modelo_DL1_ajuste))
+Modelo_DL1_ajuste = pd.melt(Modelo_DL1_ajuste,id_vars='epoca')
+Modelo_DL1_ajuste['muestra']=np.where(Modelo_DL1_ajuste['variable'].str.contains('val_'),'test','train')
+Modelo_DL1_ajuste['metrica']=Modelo_DL1_ajuste['variable'].str.replace('val_','')
+Modelo_DL1_ajuste
+
+px.line(
+  Modelo_DL1_ajuste,
+  x = 'epoca',
+  y = 'value',
+  color = 'muestra',
+  facet_col='metrica'
+)
+
+
+# evluar ajuste sobre muestra de test
+y_pred = Modelo_DL1.predict(data_test_x)
+y_pred = pd.DataFrame(y_pred,columns=lb.classes_)
+y_pred['Sentiment']=y_pred.idxmax(axis=1)
+y_pred
+
+y_real = data_test_y.copy().reset_index(drop=True)
+y_real.columns=lb.classes_
+y_real['Sentiment']=y_real.idxmax(axis=1)
+y_real
+
+print(confusion_matrix(y_real['Sentiment'],y_pred['Sentiment']))
+print(classification_report(y_real['Sentiment'],y_pred['Sentiment']))
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo2 DL (Deep Leaning): sensibilizando hiper-parametros
+
+
+# definir funcion para crear modelo 
+def Modelo_DL_HP(hp):
+  
+  clear_session()
+
+  # crear modelo en blanco (https://keras.io/api/keras_tuner/hyperparameters/)
+  modelo = Sequential()
+  
+  # definir variables que se sensibilizaran
+  hp_funcion_activacion = hp.Choice('activation',['relu','tanh'])
+  hp_unidades = hp.Int('units',min_value=80,max_value=120,step=10,default=96)
+  hp_drop = hp.Float('rate',min_value=0.1,max_value=0.3,step=0.1,default=0.2)
+  
+  # agregar capas y luego compilar modelo
+  modelo.add(Dense(hp_unidades,input_dim=data_train_x.shape[1],activation=hp_funcion_activacion))
+  modelo.add(Dropout(hp_drop))
+  modelo.add(Dense(hp_unidades,activation=hp_funcion_activacion))
+  modelo.add(Dropout(hp_drop))
+  modelo.add(Dense(3,activation='softmax'))
+  
+  modelo.compile(loss='categorical_crossentropy',optimizer='adam',metrics=['accuracy'])
+  
+  return modelo
+
+# inicializar tuneador de keras
+tuner = kt.BayesianOptimization(
+  hypermodel=Modelo_DL_HP,
+  objective=kt.Objective('val_accuracy',direction='max'),
+  max_trials=10,
+  overwrite=True  
+)
+
+tuner.search_space_summary() # detalle de espacio de busqueda para sensibilizacion
+
+# encontrar mejores hiper-parametros
+tuner.search(
+  data_train_x,
+  data_train_y,
+  epochs=10,
+  validation_split=0.2
+)
+
+# recoger mejores parametros
+tuner.get_best_hyperparameters(1)[0].values
+
+# construir modelo con mejores parametros
+Modelo_DL2=tuner.hypermodel.build(
+  tuner.get_best_hyperparameters(1)[0]
+)
+
+Modelo_DL2.summary()
+
+# entrenar modelo 
+Modelo_DL2.compile(loss='categorical_crossentropy',optimizer='adam',metrics=['accuracy'])
+
+Modelo_DL2_H = Modelo_DL2.fit(
+  data_train_x,
+  data_train_y,
+  epochs=50,
+  validation_split=0.2,
+  batch_size=5  
+)
+
+
+# graficar resultados de la red
+Modelo_DL2_ajuste = pd.DataFrame(Modelo_DL2_H.history)
+Modelo_DL2_ajuste['epoca']=range(1,1+len(Modelo_DL2_ajuste))
+Modelo_DL2_ajuste = pd.melt(Modelo_DL2_ajuste,id_vars='epoca')
+Modelo_DL2_ajuste['muestra']=np.where(Modelo_DL2_ajuste['variable'].str.contains('val_'),'test','train')
+Modelo_DL2_ajuste['metrica']=Modelo_DL2_ajuste['variable'].str.replace('val_','')
+Modelo_DL2_ajuste
+
+px.line(
+  Modelo_DL2_ajuste,
+  x = 'epoca',
+  y = 'value',
+  color = 'muestra',
+  facet_col='metrica'
+)
+
+
+# evluar ajuste sobre muestra de test
+y_pred = Modelo_DL2.predict(data_test_x)
+y_pred = pd.DataFrame(y_pred,columns=lb.classes_)
+y_pred['Sentiment']=y_pred.idxmax(axis=1)
+y_pred
+
+y_real = data_test_y.copy().reset_index(drop=True)
+y_real.columns=lb.classes_
+y_real['Sentiment']=y_real.idxmax(axis=1)
+y_real
+
+print(confusion_matrix(y_real['Sentiment'],y_pred['Sentiment']))
+print(classification_report(y_real['Sentiment'],y_pred['Sentiment']))
+
+
+
+#===================================================================================================
+# Ejercicios de clases: Modelo de Deep Learning Multi-Clase - RED CONVOLUCIONAL + RECURRENTE
+#===================================================================================================
+
+# importar data de train y test para analisis de sentimiento 
+sa_train = pd.read_csv('sentiment_analysis_train.csv',encoding='latin-1')
+sa_test = pd.read_csv('sentiment_analysis_test.csv',encoding='latin-1')
+
+df_sa = pd.concat([sa_train,sa_test],axis=0).reset_index(drop=True)
+df_sa
+
+# revisar proporcion de casos 
+df_sa['Sentiment'].value_counts(normalize=True)
+
+# importar modelo de spacy
+# !python -m spacy download en_core_web_sm
+nlp = spacy.load('en_core_web_sm')
+
+
+# crear vocaluario (https://github.com/tensorflow/tensorflow/issues/43559)
+vectorizer = TextVectorization()
+vectorizer.adapt(df_sa['OriginalTweet'])
+vocab = vectorizer.get_vocabulary()
+vocab = [v for v in vocab if len(v)>0] # quitar caracteres vacios
+
+len(vocab) # largo del vocabulario
+
+
+# construir embedding Matrix
+num_tokens = len(vocab)
+embedding_dim = len(nlp('the').vector)
+
+embedding_matrix = np.zeros((num_tokens,embedding_dim))
+embedding_matrix
+
+len(embedding_matrix[0])
+embedding_matrix.shape
+
+for i,word in enumerate(vocab):
+  embedding_matrix[i]=nlp(word.lower()).vector
+  
+embedding_matrix
+
+
+# Crear y entrenar tokenizador de keras (eventualmente entrenar tokenizador solo con data train)
+tokenizador = Tokenizer(
+  num_words=len(vocab), # largo del vocabulario (total de palabras)
+  oov_token='<OOV>' # token default para "out of vocabulary" (OOV)
+)
+
+tokenizador.fit_on_texts(df_sa['OriginalTweet'])
+tokenizador
+
+
+# Crear secuencias de texto
+df_sa_seq = tokenizador.texts_to_sequences(df_sa['OriginalTweet'])
+df_sa_seq
+
+df_sa_seq_pad = pad_sequences(
+  df_sa_seq,
+  padding='post',
+  maxlen=250
+  )
+
+df_sa_seq_pad
+df_sa_seq_pad.shape
+
+
+# crear df con nueva informacion
+df_sa2 = pd.concat([
+  df_sa,
+  pd.DataFrame(
+    df_sa_seq_pad,
+    columns=['T'+str(i) for i in range(1,1+len(df_sa_seq_pad[0]))]
+    )
+  ],axis=1)
+
+df_sa2
+
+
+# aplicar tratamiento sobre variable a predecir (multiclase)
+lb = LabelBinarizer()
+lb.fit(df_sa2['Sentiment'])
+
+lb.classes_
+len(lb.classes_)
+
+df_sa3=pd.concat([
+  df_sa2,
+  pd.DataFrame(
+    lb.transform(df_sa2['Sentiment']),
+    columns=['y'+str(i) for i in range(1,1+len(lb.classes_))]
+    )
+  ],axis=1)
+
+df_sa3.sample(5)
+
+
+# definir variables x e y, para luego separar bases
+var_x = ['T'+str(i) for i in range(1,1+len(df_sa_seq_pad[0]))]
+var_x
+
+var_y = ['y'+str(i) for i in range(1,1+len(lb.classes_))]
+var_y
+
+df_modelo = df_sa3[var_x+var_y]
+df_modelo
+
+data_train_x,data_test_x,data_train_y,data_test_y = train_test_split(
+  df_modelo[var_x],
+  df_modelo[var_y],
+  train_size=0.8,
+  random_state=0,
+  stratify=df_modelo[var_y]
+)
+
+print('data_train_x',data_train_x.shape)
+print('data_test_x',data_test_x.shape)
+print('data_train_y',data_train_y.shape)
+print('data_test_y',data_test_y.shape)
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo1 CNN (Deep Leaning) --> Redes convolucionales
+
+
+Modelo_CNN1 = Sequential()
+
+Modelo_CNN1.add(Embedding(
+  input_dim=len(vocab),
+  output_dim=embedding_dim, # 96
+  embeddings_initializer=initializers.Constant(embedding_matrix),
+  trainable=False  
+  ))
+
+Modelo_CNN1.add(Conv1D(32,5,activation='relu'))
+
+Modelo_CNN1.add(GlobalMaxPool1D())
+
+Modelo_CNN1.add(Dense(32,activation='relu'))
+
+Modelo_CNN1.add(Dense(3,activation='softmax'))
+
+Modelo_CNN1.compile(loss='categorical_crossentropy',optimizer='adam',metrics=['accuracy'])
+
+Modelo_CNN1.summary()
+
+# configurar early stop antes de correr el modelo
+early_stop = EarlyStopping(monitor='val_accuracy',min_delta=0,patience=3)
+
+Modelo_CNN1_H = Modelo_CNN1.fit(
+  data_train_x,
+  data_train_y,
+  epochs=15,
+  validation_split=0.2,
+  batch_size=5,
+  callbacks=[early_stop] 
+)
+
+
+
+# graficar resultados de la red
+Modelo_CNN1_ajuste = pd.DataFrame(Modelo_CNN1_H.history)
+Modelo_CNN1_ajuste['epoca']=range(1,1+len(Modelo_CNN1_ajuste))
+Modelo_CNN1_ajuste = pd.melt(Modelo_CNN1_ajuste,id_vars='epoca')
+Modelo_CNN1_ajuste['muestra']=np.where(Modelo_CNN1_ajuste['variable'].str.contains('val_'),'test','train')
+Modelo_CNN1_ajuste['metrica']=Modelo_CNN1_ajuste['variable'].str.replace('val_','')
+Modelo_CNN1_ajuste
+
+px.line(
+  Modelo_CNN1_ajuste,
+  x = 'epoca',
+  y = 'value',
+  color = 'muestra',
+  facet_col='metrica'
+)
+
+
+# evluar ajuste sobre muestra de test
+y_pred = Modelo_CNN1.predict(data_test_x)
+y_pred = pd.DataFrame(y_pred,columns=lb.classes_)
+y_pred['Sentiment']=y_pred.idxmax(axis=1)
+y_pred
+
+y_real = data_test_y.copy().reset_index(drop=True)
+y_real.columns=lb.classes_
+y_real['Sentiment']=y_real.idxmax(axis=1)
+y_real
+
+print(confusion_matrix(y_real['Sentiment'],y_pred['Sentiment']))
+print(classification_report(y_real['Sentiment'],y_pred['Sentiment']))
+
+
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Modelo1 RNN (Deep Leaning) --> Redes recurrentes
+
+
+Modelo_RNN1 = Sequential()
+
+Modelo_RNN1.add(Embedding(
+  input_dim=len(vocab),
+  output_dim=embedding_dim, # 96
+  embeddings_initializer=initializers.Constant(embedding_matrix),
+  trainable=False  
+  ))
+
+Modelo_RNN1.add(Bidirectional(LSTM(units=10)))
+
+Modelo_RNN1.add(Dense(10,activation='relu'))
+
+Modelo_RNN1.add(Dense(3,activation='softmax'))
+
+Modelo_RNN1.compile(loss='categorical_crossentropy',optimizer='adam',metrics=['accuracy'])
+
+Modelo_RNN1.summary()
+
+# configurar early stop antes de correr el modelo
+early_stop = EarlyStopping(monitor='val_accuracy',min_delta=0,patience=3)
+
+Modelo_RNN1_H = Modelo_RNN1.fit(
+  data_train_x,
+  data_train_y,
+  epochs=10,
+  validation_split=0.2,
+  batch_size=5,
+  callbacks=[early_stop] 
+)
+
+
+
+# graficar resultados de la red
+Modelo_RNN1_ajuste = pd.DataFrame(Modelo_RNN1_H.history)
+Modelo_RNN1_ajuste['epoca']=range(1,1+len(Modelo_RNN1_ajuste))
+Modelo_RNN1_ajuste = pd.melt(Modelo_RNN1_ajuste,id_vars='epoca')
+Modelo_RNN1_ajuste['muestra']=np.where(Modelo_RNN1_ajuste['variable'].str.contains('val_'),'test','train')
+Modelo_RNN1_ajuste['metrica']=Modelo_RNN1_ajuste['variable'].str.replace('val_','')
+Modelo_RNN1_ajuste
+
+px.line(
+  Modelo_RNN1_ajuste,
+  x = 'epoca',
+  y = 'value',
+  color = 'muestra',
+  facet_col='metrica'
+)
+
+
+# evluar ajuste sobre muestra de test
+y_pred = Modelo_RNN1.predict(data_test_x)
+y_pred = pd.DataFrame(y_pred,columns=lb.classes_)
+y_pred['Sentiment']=y_pred.idxmax(axis=1)
+y_pred
+
+y_real = data_test_y.copy().reset_index(drop=True)
+y_real.columns=lb.classes_
+y_real['Sentiment']=y_real.idxmax(axis=1)
+y_real
+
+print(confusion_matrix(y_real['Sentiment'],y_pred['Sentiment']))
+print(classification_report(y_real['Sentiment'],y_pred['Sentiment']))
+
+
+
+
+#===================================================================================================
+# Ejercicios de clases: Clasificacion NO supervisada --> k-means
+#===================================================================================================
+
+
+# importar data de train y test para analisis de sentimiento 
+sa_train = pd.read_csv('sentiment_analysis_train.csv',encoding='latin-1')
+sa_test = pd.read_csv('sentiment_analysis_test.csv',encoding='latin-1')
+
+df_sa = pd.concat([sa_train,sa_test],axis=0).reset_index(drop=True)
+df_sa
+
+# revisar proporcion de casos 
+df_sa['Sentiment'].value_counts(normalize=True)
+
+# importar modelo de spacy
+# !python -m spacy download en_core_web_sm
+nlp = spacy.load('en_core_web_sm')
+
+
+# obtener representacion vectorial
+doc = nlp(df_sa.loc[2,'OriginalTweet'])
+doc.vector
+
+doc_vectors =[]
+for t in df_sa['OriginalTweet']:
+  doc = nlp(t)
+  doc_vectors.append(doc.vector)
+  
+doc_vectors 
+
+# crear df con nueva informacion
+df_sa2 = pd.concat([
+  df_sa,
+  pd.DataFrame(
+    doc_vectors,
+    columns=['V'+str(i) for i in range(1,1+len(doc_vectors[0]))]
+    )
+  ],axis=1)
+
+df_sa2
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Aplicar k-means
+
+var_x = ['V'+str(i) for i in range(1,1+len(doc_vectors[0]))]
+var_x
+
+
+# hacer grafico del codo
+inercia = []
+for k in range(2,16):
+  
+  km = KMeans(n_clusters=k,max_iter=200,n_init=10)
+  
+  km.fit(df_sa2[var_x])
+  
+  inercia.append(km.inertia_)
+
+
+df_km =pd.DataFrame({
+  'k': range(2,16),
+  'inercia': inercia
+})
+df_km
+
+px.line(df_km,x='k',y='inercia')
+
+
+# quedarse con un n de grupos a categorizar y asignar a base 
+km = KMeans(n_clusters=4,max_iter=200,n_init=10)
+km.fit(df_sa2[var_x])
+km.labels_
+
+df_sa2['kmeans']=[str(x+1) for x in km.labels_]
+df_sa2
+
+
+#. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+# Descripcion de k-means
+
+
+# .  .  .  .  .   .   .   .   .   .    .    .    .    .     .      .     . 
+# Aplicar PCA para visualizacion de grafico de disperion en menos ejes
+
+pca = PCA(n_components=3)
+data_pca = pca.fit_transform(df_sa2[var_x])
+data_pca
+
+# revisar varianza explicada 
+pca.explained_variance_
+pca.explained_variance_ratio_
+pca.explained_variance_ratio_.sum()
+
+df_pca = pd.DataFrame(
+  data_pca,
+  columns = ['PCA'+str(i) for i in range(1,1+len(data_pca[0]))]
+)
+df_pca
+
+df_sa3 = pd.concat([df_sa2,df_pca],axis=1)
+df_sa3
+
+# ver graficamente
+px.scatter(
+  df_sa3,
+  x='PCA1',
+  y='PCA2',
+  color = 'kmeans',
+  symbol='Sentiment'  
+)
+
+
+px.scatter_3d(
+  df_sa3,
+  x='PCA1',
+  y='PCA2',
+  z='PCA3',
+  color = 'kmeans',
+  symbol='Sentiment'  
+)
+
+# .  .  .  .  .   .   .   .   .   .    .    .    .    .     .      .     . 
+# Nube de palabras segun Cluster
+
+df_sa4 = df_sa3[['OriginalTweet','Sentiment','kmeans']]
+df_sa4
+
+
+# crear en df campo con lista de tokens depurados
+df_sa4['lista_tokens']=''
+
+for i in range(0,len(df_sa4)):  
+  texto = df_sa4.iloc[i,0]
+  
+  if not pd.isna(texto): 
+  
+    doc1 = nlp(df_sa4.iloc[i,0])
+    
+    lista = [
+      t.lemma_.lower().replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u')
+      for t in doc1 if not t.is_punct and not t.is_stop and not t.is_digit and not t.is_space
+    ]
+    
+    df_sa4.at[i,'lista_tokens']=lista
+
+df_sa4
+
+
+# expandir df por palabra (https://stackoverflow.com/questions/39011511/pandas-expand-rows-from-list-data-available-in-column)
+df_sa5 = df_sa4.explode('lista_tokens').reset_index(drop=True)
+df_sa5
+
+
+
+for i in df_sa5['kmeans'].unique():
+  
+  df_wc = df_sa5[df_sa5['kmeans']==i]
+
+  # https://stackoverflow.com/questions/38465478/wordcloud-from-data-frame-with-frequency-python
+  plt.figure(figsize=(8,8))
+              
+  wordcloud = WordCloud(
+  width=800, 
+  height=400,
+  background_color='salmon', 
+  colormap='Pastel1',
+  max_words=50
+  ).generate_from_frequencies(
+      df_wc.groupby('lista_tokens')['lista_tokens'].count().to_dict()
+      )
+
+  plt.imshow(wordcloud, interpolation='bilinear')
+  plt.title('Sub-Grupo: '+str(i))
+  plt.axis('off')
+  plt.figure()
+  plt.show()
+
+
+
+
+for i in df_sa5['Sentiment'].unique():
+  
+  df_wc = df_sa5[df_sa5['Sentiment']==i]
+
+  # https://stackoverflow.com/questions/38465478/wordcloud-from-data-frame-with-frequency-python
+  plt.figure(figsize=(8,8))
+              
+  wordcloud = WordCloud(
+  width=800, 
+  height=400,
+  background_color='salmon', 
+  colormap='Pastel1',
+  max_words=50
+  ).generate_from_frequencies(
+      df_wc.groupby('lista_tokens')['lista_tokens'].count().to_dict()
+      )
+
+  plt.imshow(wordcloud, interpolation='bilinear')
+  plt.title('Sub-Grupo: '+str(i))
+  plt.axis('off')
+  plt.figure()
+  plt.show()
+        
+
+# ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !
+# se puede hacer lo mismo pero con vectorizacion de TF-IDF + TruncatedSVD (en vez de PCA)
+# como se realizo para modelar en los primeros ejercicios 
+
+
+
+
+
+
+
+
+
+
+
